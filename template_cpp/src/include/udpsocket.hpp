@@ -16,24 +16,31 @@ public:
         }
     }
     ~UDPSocket() {
-        close(socketFd);
+        if(socketFd >= 0){
+            close(socketFd);
+        }
     }
 
     void send(const sockaddr_in& receiver, const uint8_t* message, size_t length){
-        sendto(socketFd, message, length, 0, (const struct sockaddr*)&receiver, sizeof(receiver));
+        sendto(socketFd, message, length, 0, reinterpret_cast<const struct sockaddr*>(&receiver), sizeof(receiver));
     }
 
     void bind(const sockaddr_in& address){
-        if (::bind(socketFd, (const struct sockaddr*)&address, sizeof(address)) < 0) {
+        if (::bind(socketFd, reinterpret_cast<const struct sockaddr*>(&address), sizeof(address)) < 0) {
             throw std::runtime_error("Failed to bind UDP socket");
         }
     }
 
-    int receive(sockaddr_in& sender, uint8_t* buffer, size_t bufferSize){
+    void closeSocket(){
+        close(socketFd);
+        socketFd = -1;
+    }
+
+    ssize_t receive(sockaddr_in& sender, uint8_t* buffer, size_t bufferSize){
         socklen_t senderLen = sizeof(sender);
-        ssize_t receivedBytes = recvfrom(socketFd, buffer, bufferSize, 0, (struct sockaddr*)&sender, &senderLen);
+        ssize_t receivedBytes = recvfrom(socketFd, buffer, bufferSize, 0, reinterpret_cast<struct sockaddr*>(&sender), &senderLen);
         if (receivedBytes < 0) {
-            throw std::runtime_error("Failed to receive UDP message");
+            return -1; // Error occurred
         }
         return receivedBytes;
     }

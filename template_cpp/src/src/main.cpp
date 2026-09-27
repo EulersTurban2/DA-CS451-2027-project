@@ -1,11 +1,37 @@
 #include <chrono>
+#include <fstream>
 #include <iostream>
+#include <netinet/in.h>
+#include <vector>
+#include <unordered_map>
 #include <thread>
 
 #include "parser.hpp"
+#include "udpsocket.hpp"
+#include "plink.hpp"
 #include "hello.h"
 #include <signal.h>
 
+
+static void buildMapFromIdToAddress(const std::vector<Parser::Host>& hosts, std::unordered_map<unsigned long, sockaddr_in>& processIdToAddress) {
+    for (const auto& host : hosts) {
+        sockaddr_in address;
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = host.ip;
+        address.sin_port = host.port;
+        processIdToAddress[host.id] = address;
+    }
+}
+
+static void parseConfigFile(const std::string& configPath, int& noMsg, unsigned long& receiverId){
+  std::ifstream configFile(configPath);
+  if (!configFile.is_open()) {
+    std::cerr << "Error opening config file: " << configPath << std::endl;
+    exit(EXIT_FAILURE);
+  }
+  configFile >> noMsg >> receiverId;
+  configFile.close();
+}
 
 static void stop(int) {
   // reset signal handlers to default
@@ -62,13 +88,41 @@ int main(int argc, char **argv) {
   std::cout << "Path to config:\n";
   std::cout << "===============\n";
   std::cout << parser.configPath() << "\n\n";
+  
+  int noMsg = 0;
+  unsigned long receiverId = 0;
+  parseConfigFile(parser.configPath(), noMsg, receiverId);
 
   std::cout << "Doing some initialization...\n\n";
 
+  UDPSocket udpSocket;
+
+  std::unordered_map<unsigned long, sockaddr_in> processIdToAddress;
+  buildMapFromIdToAddress(hosts, processIdToAddress);
+  
+  udpSocket.bind(processIdToAddress.at(parser.id()));
+  
+  PerfectLink perfectLink(udpSocket, [](unsigned long senderId, int seqNr) {
+    std::cout << "Delivered message from sender ID: " << senderId << ", sequence number: " << seqNr << "\n";
+  }, processIdToAddress, parser.id());
+
+  perfectLink.start();
+
+  if(parser.id() != receiverId){
+    for(int i = 1; i <= noMsg; ++i){
+      std::string message = "Message " + std::to_string(i) + " from process " + std::to_string(parser.id());
+      perfectLink.send(receiverId, i, message);
+    }
+  }
+  
   std::cout << "Broadcasting and delivering messages...\n\n";
 
   // After a process finishes broadcasting,
   // it waits forever for the delivery of messages.
+
+
+
+
   while (true) {
     std::this_thread::sleep_for(std::chrono::hours(1));
   }
